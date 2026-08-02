@@ -5,22 +5,23 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.prompt import Prompt
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
+from google import genai
+from google.genai import types
 
 from prompts import get_system_instruction
 from learner_model import calculate_user_level, update_stats
 
 console = Console()
 
-def configure_gemini():
-    """Validates API key and configures the Gemini client."""
+def get_gemini_client():
+    """Validates API key and configures the new Gemini client."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         console.print("[bold red]Error:[/bold red] GEMINI_API_KEY environment variable not found.")
         console.print("Please set it using: [cyan]export GEMINI_API_KEY='your_key'[/cyan]")
         exit(1)
-    genai.configure(api_key=api_key)
+    return genai.Client(api_key=api_key)
 
 def read_code_file(filepath: str) -> str:
     """Safely attempts to read the code file."""
@@ -34,16 +35,10 @@ def read_code_file(filepath: str) -> str:
         console.print(f"[bold red]Error reading file:[/bold red] {str(e)}")
         exit(1)
 
-def get_scaffolded_guidance(code: str, error_msg: str, user_level: str) -> dict:
-    """Makes a SINGLE API call to Gemini requesting structured JSON containing 3 levels of help."""
+def get_scaffolded_guidance(client, code: str, error_msg: str, user_level: str) -> dict:
+    """Makes a SINGLE API call to Gemini using the new SDK."""
    
     system_instruction = get_system_instruction(user_level)
-   
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        system_instruction=system_instruction,
-        generation_config={"response_mime_type": "application/json"}
-    )
    
     user_prompt = (
         f"Here is my code:\n```\n{code}\n```\n\n"
@@ -53,11 +48,90 @@ def get_scaffolded_guidance(code: str, error_msg: str, user_level: str) -> dict:
 
     with console.status(f"[bold green]Analyzing code & generating hints for a(n) {user_level} developer...", spinner="dots"):
         try:
-            response = model.generate_content(
-                user_prompt,
-                safety_settings={
-                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                }
+            response = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                )
+    client = get_gemini_client()
+   
+    code_content = read_code_file(filepath)
+   
+    current_level = calculate_user_level()
+   
+    guidance = get_scaffolded_guidance(client, code_content, error_msg, current_level)
+
+    run_interactive_scaffolding(guidance)
+
+if __name__ == "__main__":
+    main()
+
+Shruti Singh
+20:03 (0 minutes ago)
+to me
+
+import os
+import json
+import argparse
+from rich.console import Console
+from rich.panel import Panel
+from rich.markdown import Markdown
+from rich.prompt import Prompt
+
+# NEW GOOGLE GENAI SDK IMPORTS
+from google import genai
+from google.genai import types
+
+from prompts import get_system_instruction
+from learner_model import calculate_user_level, update_stats
+
+console = Console()
+
+def get_gemini_client():
+    """Validates API key and configures the new Gemini client."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        console.print("[bold red]Error:[/bold red] GEMINI_API_KEY environment variable not found.")
+        console.print("Please set it using: [cyan]export GEMINI_API_KEY='your_key'[/cyan]")
+        exit(1)
+    # client object
+    return genai.Client(api_key=api_key)
+
+def read_code_file(filepath: str) -> str:
+    """Safely attempts to read the code file."""
+    try:
+        with open(filepath, 'r') as file:
+            return file.read()
+    except FileNotFoundError:
+        console.print(f"[bold red]Error:[/bold red] Could not find the file '{filepath}'.")
+        exit(1)
+    except Exception as e:
+        console.print(f"[bold red]Error reading file:[/bold red] {str(e)}")
+        exit(1)
+
+def get_scaffolded_guidance(client, code: str, error_msg: str, user_level: str) -> dict:
+    """Makes a SINGLE API call to Gemini using the new SDK."""
+   
+    system_instruction = get_system_instruction(user_level)
+   
+    user_prompt = (
+        f"Here is my code:\n```\n{code}\n```\n\n"
+        f"Here is the error/issue I am facing:\n{error_msg}\n\n"
+        f"Provide the 3 levels of progressive scaffolding in JSON."
+    )
+
+    with console.status(f"[bold green]Analyzing code & generating hints for a(n) {user_level} developer...", spinner="dots"):
+        try:
+            # New SDK Generation call
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                )
             )
             return json.loads(response.text)
         except json.JSONDecodeError:
@@ -89,7 +163,7 @@ def run_interactive_scaffolding(guidance: dict):
         console.print("\n[bold green]🎉 Awesome! Logged a Tier 1 solve. Your Learner Profile has been updated.[/bold green]\n")
         return
 
-    # Tier 2: Intermediate help
+    # Tier 2: help
     console.print("\n")
     console.print(Panel(
         Markdown(guidance.get("level_2_explanation", "No explanation available.")),
@@ -108,7 +182,7 @@ def run_interactive_scaffolding(guidance: dict):
         console.print("\n[bold green]🎉 Great progress! Concept understood. Profile updated.[/bold green]\n")
         return
 
-    # Tier 3: Fix
+    # Tier 3: fix
     console.print("\n")
     console.print(Panel(
         Markdown(guidance.get("level_3_solution", "No solution available.")),
@@ -131,14 +205,16 @@ def main():
     filepath = args.file or Prompt.ask("📂 Enter the path to your broken code file")
     error_msg = args.error or Prompt.ask("🐛 Enter the error message or describe the bug")
 
-    configure_gemini()
+    # Get the client using the new SDK
+    client = get_gemini_client()
+   
     code_content = read_code_file(filepath)
    
     # 1. Evaluate user level locally
     current_level = calculate_user_level()
    
     # 2. Make 1 single API call requesting all 3 tiers based on user level
-    guidance = get_scaffolded_guidance(code_content, error_msg, current_level)
+    guidance = get_scaffolded_guidance(client, code_content, error_msg, current_level)
 
     # 3. Present interactively and log results
     run_interactive_scaffolding(guidance)
