@@ -2,6 +2,8 @@ Adaptive Coding Mentor
 
 This is a CLI-based educational coding mentor designed to help developers learn from their mistakes rather than just copying and pasting fixed code.
 
+![Demo](assets/demo.gif)
+
 Taking inspiration from the **NUS-Google AI in Education partnership**, this project implements **Progressive Adaptive Scaffolding** backed by an **Implicit Learner Model**. Instead of standard "code-feeding," Scaffold-AI evaluates your debugging skills over time and tailors its hints to exactly what you need.
 
 Implicit Learner Modelling 
